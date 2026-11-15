@@ -1,4 +1,6 @@
-# Fayl Audit Paneli
+# AuditPulse
+
+**Fayl Audit Paneli**
 
 Linux-da fayl və qovluqlarla edilən əməliyyatları **kim, nə, nə vaxt və hansı proqramla** etdiyini göstərən veb panel. Xam log mətni əvəzinə hər hadisəni səliqəli cədvəldə, rəngli etiketlərlə göstərir.
 
@@ -64,15 +66,15 @@ sudo apt install -y git
 ### 3-cü addım: Layihəni yükləyin
 
 ```bash
-git clone https://github.com/mikayilmovsumzada/fayl-audit.git
+git clone https://github.com/mikayilmovsumzada/AuditPulse.git
 ```
 
-Bu əmr olduğunuz yerdə `fayl-audit` adlı qovluq yaradacaq.
+Bu əmr olduğunuz yerdə `AuditPulse` adlı qovluq yaradacaq.
 
 ### 4-cü addım: Layihə qovluğuna keçin
 
 ```bash
-cd fayl-audit
+cd AuditPulse
 ```
 
 ### 5-ci addım: Quraşdırıcını işlədin
@@ -211,7 +213,7 @@ Susmaya görə panel yalnız həmin kompüterdə açılır. Şəbəkədəki baş
 
 ## Silmək
 
-Layihə qovluğunda (`cd fayl-audit`) işlədin:
+Layihə qovluğunda (`cd AuditPulse`) işlədin:
 
 ```bash
 sudo bash uninstall.sh
@@ -259,7 +261,7 @@ journalctl -u fileaudit -n 30
 
 **`install.sh` "Fayl tapılmadı" deyir**
 
-`install.sh` faylını layihə qovluğunun içində işlətmək lazımdır. Əvvəlcə `cd fayl-audit` yazın.
+`install.sh` faylını layihə qovluğunun içində işlətmək lazımdır. Əvvəlcə `cd AuditPulse` yazın.
 
 **`apt` xəta verir**
 
