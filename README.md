@@ -4,6 +4,20 @@
 
 Linux-da fayl və qovluqlarla edilən əməliyyatları **kim, nə, nə vaxt və hansı proqramla** etdiyini göstərən veb panel. Xam log mətni əvəzinə hər hadisəni səliqəli cədvəldə, rəngli etiketlərlə göstərir.
 
+![AuditPulse paneli: hadisə kartları, 24 saatlıq qrafik və hadisələr siyahısı](docs/panel-dark.png)
+
+Hadisəyə klikləyəndə ətraflı məlumat açılır. `chmod` hadisələrində köhnə və yeni icazə, dəyişən r/w/x xanaları ilə birlikdə göstərilir:
+
+![chmod hadisəsinin detalları: 0664 → 0600](docs/panel-chmod.png)
+
+<details>
+<summary>Açıq tema</summary>
+
+![AuditPulse paneli açıq temada](docs/panel-light.png)
+
+Panel kompüterin temasına (açıq və ya qaranlıq) avtomatik uyğunlaşır.
+</details>
+
 ## Nələri göstərir?
 
 | Hadisə | Nümunə |
