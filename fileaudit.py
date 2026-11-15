@@ -67,11 +67,18 @@ def group_name(gid):
     return _name_cache[key]
 
 
+HEX_KEYS = {"name", "cwd", "proctitle", "exe", "comm"}
+
+
 def fields(text):
     text = text.split("\x1d", 1)[0]  # drop ENRICHED tail
     out = {}
     for k, v in FIELD_RE.findall(text):
-        out.setdefault(k, v[1:-1] if v.startswith('"') else v)
+        if v.startswith('"'):
+            v = v[1:-1]  # quoted values are plain text
+        elif k in HEX_KEYS:
+            v = decode_hex(v)  # unquoted names/paths are hex-encoded by auditd
+        out.setdefault(k, v)
     return out
 
 
@@ -111,7 +118,6 @@ class Event:
 def full_path(name, cwd):
     if not name or name == "(null)":
         return None
-    name = decode_hex(name)
     if not name.startswith("/") and cwd:
         name = os.path.join(cwd, name)
     return os.path.normpath(name)
@@ -156,7 +162,7 @@ def resolve_items(ev, sc, name, roots):
     parents = [p for p in ev.paths if p.get("nametype") == "PARENT"]
     out, k = [], 0
     for p in ev.paths:
-        name = decode_hex(p.get("name")) if p.get("name") not in (None, "(null)") else None
+        name = p.get("name") if p.get("name") not in (None, "(null)") else None
         fp = None
         if name and not name.startswith("/") and dirfd_used and p.get("nametype") != "PARENT" and parents:
             parent = parents[min(k, len(parents) - 1)]
@@ -187,6 +193,14 @@ def classify(ev):
     success = sc.get("success") == "yes"
     if not success and sc.get("exit") not in ERR_DENIED:
         return None  # e.g. EEXIST/ENOENT probes: noise
+    if not success and name in ("open", "openat"):
+        # denied read-only opens (e.g. pgrep reading /proc/*/environ) are not changes
+        try:
+            flags = int(sc.get("a1" if name == "open" else "a2", "0"), 16)
+        except ValueError:
+            flags = 0
+        if not flags & (0o1 | 0o2 | 0o100 | 0o1000):  # O_WRONLY|O_RDWR|O_CREAT|O_TRUNC
+            return None
 
     all_roots = [d for ds in ROOTS.values() for d in ds]
     items = resolve_items(ev, sc, name, ROOTS.get(sc.get("key"), all_roots))
@@ -202,7 +216,7 @@ def classify(ev):
             return None
         pdir = parents[0][1].rstrip("/") or "/"
         guess = None
-        for arg in (decode_hex(ev.proctitle) or "").split()[1:]:
+        for arg in (ev.proctitle or "").split()[1:]:
             fp = full_path(arg, ev.cwd)
             if fp and os.path.dirname(fp) == pdir:
                 guess = fp
@@ -286,7 +300,7 @@ def classify(ev):
     if not success:
         row["action_result"] = "denied"
     auid, euid = sc.get("auid"), sc.get("euid")
-    cmd = decode_hex(ev.proctitle) if ev.proctitle else None
+    cmd = ev.proctitle or None
     hidden = any(part.startswith(".") for part in (row["path"] or "").split("/") if part)
     row.update(
         ev_key=f"{ev.ts}:{ev.serial}", ts=float(ev.ts), serial=int(ev.serial),
@@ -358,7 +372,7 @@ class Collector(threading.Thread):
         elif ev is None:
             return  # SYSCALL is always the first record of a watched event
         if rtype == "CWD":
-            ev.cwd = decode_hex(fields(rest).get("cwd"))
+            ev.cwd = fields(rest).get("cwd")
         elif rtype == "PATH":
             ev.paths.append(fields(rest))
         elif rtype == "PROCTITLE":
