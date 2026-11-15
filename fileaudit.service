@@ -1,0 +1,13 @@
+[Unit]
+Description=FileAudit dashboard (auditd file events)
+After=auditd.service network.target
+Wants=auditd.service
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/fileaudit/fileaudit.py
+Environment=FA_HOST=127.0.0.1 FA_PORT=8088
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

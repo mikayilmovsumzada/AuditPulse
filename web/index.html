@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="az">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fayl Audit Paneli</title>
+<style>
+:root{
+  --bg:#f5f6f8; --surface:#ffffff; --surface-2:#f0f2f5; --border:#e3e6eb;
+  --text:#14171c; --muted:#646b77; --faint:#9aa1ad;
+  --accent:#3b5bdb; --accent-soft:#e8edff;
+  --c-create:#1f9d55; --c-create-bg:#e5f6ec;
+  --c-delete:#d6336c; --c-delete-bg:#fde8ef;
+  --c-modify:#1c7ed6; --c-modify-bg:#e4f1fc;
+  --c-rename:#7048e8; --c-rename-bg:#efe9fd;
+  --c-chmod:#e67700; --c-chmod-bg:#fff1dc;
+  --c-chown:#0c8599; --c-chown-bg:#e0f5f7;
+  --c-attr:#6b7280; --c-attr-bg:#eef0f3;
+  --c-denied:#c92a2a; --c-denied-bg:#ffe8e8;
+  --shadow:0 1px 2px rgba(16,24,40,.05);
+  --radius:12px;
+  --mono:ui-monospace,SFMono-Regular,"JetBrains Mono",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0f1115; --surface:#171a21; --surface-2:#1e222b; --border:#2a2f3a;
+    --text:#e8eaef; --muted:#9aa1ad; --faint:#6b7280;
+    --accent:#748ffc; --accent-soft:#1f2747;
+    --c-create:#51cf66; --c-create-bg:#163322;
+    --c-delete:#f06595; --c-delete-bg:#3a1824;
+    --c-modify:#4dabf7; --c-modify-bg:#132c42;
+    --c-rename:#9775fa; --c-rename-bg:#261d45;
+    --c-chmod:#ffa94d; --c-chmod-bg:#3a2810;
+    --c-chown:#3bc9db; --c-chown-bg:#10333a;
+    --c-attr:#adb5bd; --c-attr-bg:#252a33;
+    --c-denied:#ff6b6b; --c-denied-bg:#3d1818;
+    --shadow:none;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1280px;margin:0 auto;padding:20px 16px 60px}
+
+/* header */
+header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:20px}
+.logo{width:38px;height:38px;border-radius:10px;background:var(--accent);display:grid;place-items:center;color:#fff;flex:none}
+.title h1{font-size:18px;margin:0;letter-spacing:-.01em}
+.title p{margin:0;color:var(--muted);font-size:13px}
+.hdr-right{margin-left:auto;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:6px;padding:4px 10px;border-radius:999px;background:var(--surface);border:1px solid var(--border);font-size:12px;color:var(--muted)}
+.chip code{font-family:var(--mono);color:var(--text)}
+.live{color:var(--c-create)}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;box-shadow:0 0 0 0 currentColor;animation:pulse 2s infinite}
+.live.off{color:var(--faint)} .live.off .dot{animation:none}
+@keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,currentColor 50%,transparent)}70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+
+/* cards */
+.stats{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;margin-bottom:14px}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;box-shadow:var(--shadow);text-align:left;cursor:pointer;transition:border-color .15s,transform .15s;position:relative}
+.stat:hover{border-color:var(--faint)}
+.stat.on{border-color:var(--k);box-shadow:0 0 0 1px var(--k) inset}
+.stat .lbl{display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px}
+.stat .sw{width:8px;height:8px;border-radius:3px;background:var(--k)}
+.stat .num{font-size:24px;font-weight:650;margin-top:4px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+
+.grid2{display:grid;grid-template-columns:1.6fr 1fr 1fr;gap:10px;margin-bottom:14px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;box-shadow:var(--shadow);min-width:0}
+.panel h2{font-size:13px;margin:0 0 10px;color:var(--muted);font-weight:600}
+.chart{height:120px;display:flex;align-items:flex-end;gap:3px}
+.bar{flex:1;background:var(--accent);opacity:.85;border-radius:3px 3px 0 0;min-height:2px;position:relative}
+.bar.zero{background:var(--border);opacity:1}
+.bar:hover{opacity:1}
+.bar:hover::after{content:attr(data-tip);position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);font-size:11px;padding:3px 7px;border-radius:6px;white-space:nowrap;z-index:5}
+.axis{display:flex;justify-content:space-between;color:var(--faint);font-size:11px;margin-top:6px}
+.rank{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:7px}
+.rank li{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;font-size:13px;cursor:pointer}
+.rank .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rank .meter{grid-column:1/-1;height:4px;background:var(--surface-2);border-radius:2px;overflow:hidden;margin-top:-3px}
+.rank .meter i{display:block;height:100%;background:var(--accent);border-radius:2px}
+.rank .n{color:var(--muted);font-variant-numeric:tabular-nums}
+.empty-s{color:var(--faint);font-size:13px}
+
+/* toolbar */
+.toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+.search{flex:1 1 260px;position:relative}
+.search input{width:100%;padding:9px 12px 9px 34px;border-radius:10px;border:1px solid var(--border);background:var(--surface);outline:none}
+.search input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint)}
+select{padding:9px 10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);outline:none}
+.toggle{display:inline-flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;cursor:pointer;user-select:none;padding:0 4px}
+.toggle input{accent-color:var(--accent)}
+.btn{padding:8px 12px;border-radius:10px;border:1px solid var(--border);background:var(--surface);cursor:pointer;color:var(--muted)}
+.btn:hover{color:var(--text);border-color:var(--faint)}
+
+/* list */
+.list{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow)}
+.row,.lhead{display:grid;grid-template-columns:132px minmax(0,1fr) 170px 150px 110px;gap:14px;align-items:center;padding:10px 16px}
+.lhead{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);border-bottom:1px solid var(--border);background:var(--surface-2)}
+.row{border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s}
+.row:last-child{border-bottom:0}
+.row:hover{background:var(--surface-2)}
+.row.sel{background:var(--accent-soft)}
+.row.fresh{animation:fresh 2.4s ease-out}
+@keyframes fresh{from{background:color-mix(in srgb,var(--c-create) 18%,transparent)}to{background:transparent}}
+.badge{display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border-radius:7px;font-size:12px;font-weight:600;color:var(--k);background:var(--kb);white-space:nowrap}
+.badge svg{flex:none}
+.p-name{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.p-dir{color:var(--muted);font-size:12px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-extra{font-family:var(--mono);font-size:12px;color:var(--k)}
+.ficon{color:var(--faint);flex:none}
+.who{display:flex;align-items:center;gap:8px;min-width:0}
+.av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:11px;font-weight:700;color:#fff;flex:none}
+.who .u{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.who .as{font-size:11px;color:var(--c-chmod)}
+.prog{font-family:var(--mono);font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.time{color:var(--muted);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.time b{display:block;color:var(--text);font-weight:500}
+.empty{padding:50px 16px;text-align:center;color:var(--muted)}
+.more{display:block;margin:12px auto 0}
+
+/* drawer */
+.drawer{position:fixed;top:0;right:0;height:100%;width:min(460px,100%);background:var(--surface);border-left:1px solid var(--border);box-shadow:-12px 0 30px rgba(0,0,0,.12);transform:translateX(100%);transition:transform .22s ease;z-index:20;display:flex;flex-direction:column}
+.drawer.open{transform:none}
+.dr-head{padding:18px 20px;border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:flex-start}
+.dr-head h3{margin:6px 0 0;font-size:16px;word-break:break-all}
+.x{margin-left:auto;border:0;background:var(--surface-2);width:32px;height:32px;border-radius:8px;cursor:pointer;color:var(--muted);flex:none}
+.dr-body{padding:16px 20px;overflow:auto;flex:1}
+.kv{display:grid;grid-template-columns:120px 1fr;gap:10px 14px;font-size:13px}
+.kv dt{color:var(--muted)}
+.kv dd{margin:0;word-break:break-all}
+.kv code,.cmd{font-family:var(--mono);font-size:12px}
+.cmd{background:var(--surface-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;white-space:pre-wrap;word-break:break-all}
+.sec{margin-top:20px}
+.sec h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint)}
+.perm{display:grid;grid-template-columns:auto repeat(3,1fr);gap:6px;align-items:center;font-size:12px}
+.perm .h{color:var(--faint);text-align:center}
+.perm .r{color:var(--muted)}
+.trip{display:flex;gap:3px;justify-content:center}
+.trip span{width:24px;height:26px;border-radius:6px;display:grid;place-items:center;font-family:var(--mono);font-weight:700;background:var(--surface-2);color:var(--faint)}
+.trip span.y{color:var(--text)}
+.trip span.chg{background:var(--c-chmod-bg);color:var(--c-chmod);outline:1px solid var(--c-chmod)}
+.arrow{font-family:var(--mono);font-size:15px;display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.arrow .o{color:var(--muted);text-decoration:line-through}
+.arrow .n{color:var(--c-chmod);font-weight:700}
+.note{font-size:12px;color:var(--muted);margin-top:8px}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s;z-index:15}
+.scrim.open{opacity:1;pointer-events:auto}
+
+@media (max-width:1100px){
+  .stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr 1fr}
+  .grid2 .panel:first-child{grid-column:1/-1}
+}
+@media (max-width:760px){
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid2{grid-template-columns:1fr}
+  .lhead{display:none}
+  .row{grid-template-columns:1fr auto;gap:6px 10px}
+  .row .c-act{grid-column:1}
+  .row .time{grid-column:2;grid-row:1}
+  .row .c-path{grid-column:1/-1}
+  .row .who,.row .prog{grid-column:auto}
+  .hdr-right{margin-left:0}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg></div>
+    <div class="title">
+      <h1>Fayl Audit Paneli</h1>
+      <p>Fayl və qovluqlarda kim, nə vaxt, nə etdi</p>
+    </div>
+    <div class="hdr-right">
+      <span class="chip" id="host">—</span>
+      <span class="chip" id="watched">İzlənir: —</span>
+      <span class="chip live" id="live"><span class="dot"></span><span id="liveTxt">Canlı</span></span>
+    </div>
+  </header>
+
+  <section class="stats" id="stats"></section>
+
+  <section class="grid2">
+    <div class="panel">
+      <h2>Son 24 saat üzrə fəaliyyət</h2>
+      <div class="chart" id="chart"></div>
+      <div class="axis" id="axis"></div>
+    </div>
+    <div class="panel">
+      <h2>İstifadəçilər</h2>
+      <ul class="rank" id="users"></ul>
+    </div>
+    <div class="panel">
+      <h2>Ən çox toxunulan (24 saat)</h2>
+      <ul class="rank" id="paths"></ul>
+    </div>
+  </section>
+
+  <div class="toolbar">
+    <label class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input id="q" type="search" placeholder="Fayl yolu, proqram və ya əmr üzrə axtar…" autocomplete="off">
+    </label>
+    <select id="user"><option value="">Bütün istifadəçilər</option></select>
+    <select id="watch"><option value="">Bütün qovluqlar</option></select>
+    <label class="toggle"><input type="checkbox" id="hidden"> Gizli faylları göstər</label>
+    <button class="btn" id="reset">Sıfırla</button>
+  </div>
+
+  <div class="list">
+    <div class="lhead"><div>Hadisə</div><div>Fayl / qovluq</div><div>İstifadəçi</div><div>Proqram</div><div style="text-align:right">Vaxt</div></div>
+    <div id="rows"></div>
+  </div>
+  <button class="btn more" id="more" hidden>Daha çox göstər</button>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <div class="dr-head">
+    <div style="min-width:0"><div id="dBadge"></div><h3 id="dTitle"></h3></div>
+    <button class="x" id="close" aria-label="Bağla">✕</button>
+  </div>
+  <div class="dr-body" id="dBody"></div>
+</aside>
+
+<script>
+const A = {
+  create:{t:"Yaradıldı",   k:"create", i:'<path d="M12 5v14M5 12h14"/>'},
+  delete:{t:"Silindi",     k:"delete", i:'<path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/>'},
+  modify:{t:"Dəyişdirildi",k:"modify", i:'<path d="M4 20h4L19 9l-4-4L4 16v4z"/>'},
+  rename:{t:"Ad dəyişdi",  k:"rename", i:'<path d="M4 12h14M13 6l6 6-6 6"/>'},
+  chmod: {t:"İcazə (chmod)",k:"chmod", i:'<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0"/>'},
+  chown: {t:"Sahib (chown)",k:"chown", i:'<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4-6 8-6s7 2 8 6"/>'},
+  attr:  {t:"Atribut",     k:"attr",   i:'<path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/>'},
+  denied:{t:"Rədd edildi", k:"denied", i:'<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>'},
+};
+const STAT_ORDER = ["all","create","delete","modify","rename","chmod","denied"];
+const FICON = {
+  dir:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+  file:'<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+  link:'<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
+};
+const svg = (p,s=14) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const $ = id => document.getElementById(id);
+
+const st = { action:"", q:"", user:"", watch:"", hidden:false, rows:[], maxId:0, minId:null, sel:null, users:new Set() };
+try { st.hidden = localStorage.getItem("fa.hidden") === "1"; } catch {}
+$("hidden").checked = st.hidden;
+
+function kind(ev){ return ev.success ? A[ev.action] || A.attr : A.denied; }
+function badge(ev){
+  const a = kind(ev);
+  return `<span class="badge" style="--k:var(--c-${a.k});--kb:var(--c-${a.k}-bg)">${svg(a.i,13)}${a.t}</span>`;
+}
+function split(p){ const i = p.lastIndexOf("/"); return i <= 0 ? ["/", p.slice(1) || "/"] : [p.slice(0,i), p.slice(i+1)]; }
+const COLORS = ["#3b5bdb","#1f9d55","#d6336c","#e67700","#7048e8","#0c8599","#c2255c","#5c940d"];
+function avColor(n){ let h=0; for (const c of n) h = (h*31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; }
+function who(ev){
+  const u = ev.auser || (ev.euser === "root" ? "root" : "sistem");
+  const as = ev.auser && ev.euser && ev.euser !== ev.auser ? `<div class="as">→ ${esc(ev.euser)} kimi</div>` : "";
+  return `<div class="who"><span class="av" style="background:${avColor(u)}">${esc(u[0].toUpperCase())}</span><div style="min-width:0"><div class="u">${esc(u)}</div>${as}</div></div>`;
+}
+function rel(ts){
+  const d = Date.now()/1000 - ts;
+  if (d < 60) return `${Math.max(1,Math.floor(d))} san əvvəl`;
+  if (d < 3600) return `${Math.floor(d/60)} dəq əvvəl`;
+  if (d < 86400) return `${Math.floor(d/3600)} saat əvvəl`;
+  return `${Math.floor(d/86400)} gün əvvəl`;
+}
+const fmtTime = ts => new Date(ts*1000).toLocaleTimeString("az-AZ",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+const AYLAR = ["yanvar","fevral","mart","aprel","may","iyun","iyul","avqust","sentyabr","oktyabr","noyabr","dekabr"];
+const fmtFull = ts => { const d = new Date(ts*1000); return `${d.getDate()} ${AYLAR[d.getMonth()]} ${d.getFullYear()}, ${fmtTime(ts)}`; };
+function extra(ev){
+  if (ev.action === "rename" && ev.path2) return `<div class="p-extra" style="--k:var(--c-rename)">→ ${esc(ev.path2)}</div>`;
+  if (ev.action === "chmod" && ev.new_mode) return `<div class="p-extra" style="--k:var(--c-chmod)">${esc(ev.old_mode || "?")} → ${esc(ev.new_mode)}</div>`;
+  if (ev.action === "chown" && ev.new_owner) return `<div class="p-extra" style="--k:var(--c-chown)">${esc(ev.old_owner || "?")} → ${esc(ev.new_owner)}</div>`;
+  return "";
+}
+function rowHtml(ev, fresh){
+  const [dir, name] = split(ev.path || "");
+  const ex = extra(ev);
+  return `<div class="row${fresh?" fresh":""}${st.sel===ev.id?" sel":""}" data-id="${ev.id}">
+    <div class="c-act">${badge(ev)}</div>
+    <div class="c-path" style="min-width:0">
+      <div class="p-name"><span class="ficon">${svg(FICON[ev.ftype]||FICON.file,15)}</span>${esc(name)}</div>
+      ${ex || `<div class="p-dir">${esc(dir)}</div>`}
+    </div>
+    ${who(ev)}
+    <div class="prog" title="${esc(ev.exe)}">${esc(ev.comm || ev.exe || "—")}</div>
+    <div class="time" title="${esc(fmtFull(ev.ts))}"><b>${fmtTime(ev.ts)}</b>${rel(ev.ts)}</div>
+  </div>`;
+}
+function render(){
+  const el = $("rows");
+  if (!st.rows.length){
+    el.innerHTML = `<div class="empty">Bu filtrə uyğun hadisə yoxdur.<br><span style="font-size:12px;color:var(--faint)">İzlənən qovluqlarda fayl yaratdıqda, sildikdə və ya chmod etdikdə burada görünəcək.</span></div>`;
+    return;
+  }
+  el.innerHTML = st.rows.map(r => rowHtml(r, r._fresh)).join("");
+  st.rows.forEach(r => delete r._fresh);
+}
+
+function params(extra={}){
+  const p = new URLSearchParams();
+  if (st.action) p.set("action", st.action);
+  if (st.q) p.set("q", st.q);
+  if (st.user) p.set("user", st.user);
+  if (st.watch) p.set("watch", st.watch);
+  if (st.hidden) p.set("hidden", "1");
+  for (const [k,v] of Object.entries(extra)) p.set(k, v);
+  return p.toString();
+}
+async function api(path){ const r = await fetch(path); if (!r.ok) throw new Error(r.status); return r.json(); }
+
+let online = true;
+function setLive(ok){
+  if (ok === online) return; online = ok;
+  $("live").classList.toggle("off", !ok);
+  $("liveTxt").textContent = ok ? "Canlı" : "Bağlantı yoxdur";
+}
+
+async function loadEvents(){
+  const data = await api("/api/events?" + params({limit:100}));
+  st.rows = data; st.maxId = data[0]?.id || st.maxId; st.minId = data.at(-1)?.id ?? null;
+  $("more").hidden = data.length < 100;
+  render();
+}
+async function poll(){
+  try {
+    const data = await api("/api/events?" + params({after_id: st.maxId, limit: 200}));
+    setLive(true);
+    if (data.length){
+      data.forEach(d => d._fresh = true);
+      st.rows = data.concat(st.rows).slice(0, 1000);
+      st.maxId = data[0].id;
+      render();
+      loadStats();
+    }
+  } catch { setLive(false); }
+}
+$("more").onclick = async () => {
+  const data = await api("/api/events?" + params({before_id: st.minId, limit:100}));
+  st.rows = st.rows.concat(data); st.minId = data.at(-1)?.id ?? st.minId;
+  $("more").hidden = data.length < 100; render();
+};
+
+async function loadStats(){
+  const s = await api("/api/stats?" + (st.hidden ? "hidden=1" : ""));
+  const counts = {all:s.total, denied:s.denied, ...s.by_action};
+  $("stats").innerHTML = STAT_ORDER.map(k => {
+    const a = k === "all" ? {t:"Ümumi", k:"accent"} : A[k];
+    const color = k === "all" ? "var(--accent)" : `var(--c-${a.k})`;
+    const on = (st.action || "all") === k;
+    return `<button class="stat${on?" on":""}" data-k="${k}" style="--k:${color}">
+      <div class="lbl"><span class="sw"></span>${a.t}</div>
+      <div class="num">${(counts[k]||0).toLocaleString("az-AZ")}</div></button>`;
+  }).join("");
+
+  // 24h chart
+  const nowH = Math.floor(s.now/3600), map = new Map(s.hours.map(h => [h.h, h.n]));
+  const hrs = Array.from({length:24}, (_,i) => nowH - 23 + i);
+  const max = Math.max(1, ...hrs.map(h => map.get(h)||0));
+  $("chart").innerHTML = hrs.map(h => {
+    const n = map.get(h)||0;
+    const lbl = new Date(h*3600000).toLocaleTimeString("az-AZ",{hour:"2-digit",minute:"2-digit"});
+    return `<div class="bar${n?"":" zero"}" style="height:${n? Math.max(4, n/max*100) : 2}%" data-tip="${lbl} · ${n} hadisə"></div>`;
+  }).join("");
+  const hl = h => new Date(h*3600000).toLocaleTimeString("az-AZ",{hour:"2-digit",minute:"2-digit"});
+  $("axis").innerHTML = `<span>${hl(hrs[0])}</span><span>${hl(hrs[12])}</span><span>indi</span>`;
+
+  const umax = Math.max(1, ...s.users.map(u => u.n));
+  $("users").innerHTML = s.users.length ? s.users.map(u => {
+    st.users.add(u.user);
+    return `<li data-user="${esc(u.user)}"><span class="nm">${esc(u.user)}</span><span class="n">${u.n}</span><span class="meter"><i style="width:${u.n/umax*100}%;background:${avColor(u.user)}"></i></span></li>`;
+  }).join("") : `<li class="empty-s">Hələ məlumat yoxdur</li>`;
+  const pmax = Math.max(1, ...s.top_paths.map(p => p.n));
+  $("paths").innerHTML = s.top_paths.length ? s.top_paths.map(p =>
+    `<li data-q="${esc(p.path)}" title="${esc(p.path)}"><span class="nm">${esc(split(p.path)[1])}</span><span class="n">${p.n}</span><span class="meter"><i style="width:${p.n/pmax*100}%"></i></span></li>`
+  ).join("") : `<li class="empty-s">Hələ məlumat yoxdur</li>`;
+
+  const sel = $("user"), cur = sel.value;
+  sel.innerHTML = `<option value="">Bütün istifadəçilər</option>` + [...st.users].sort().map(u => `<option${u===cur?" selected":""}>${esc(u)}</option>`).join("");
+}
+
+async function loadMeta(){
+  try {
+    const m = await api("/api/meta");
+    $("host").innerHTML = `${svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',13)} <code>${esc(m.host)}</code>`;
+    $("watched").innerHTML = `İzlənir: ${m.watched.map(w => `<code>${esc(w)}</code>`).join(", ") || "—"}`;
+    $("watch").innerHTML = `<option value="">Bütün qovluqlar</option>` + m.watched.map(w => `<option value="${esc(w.split("/").pop())}">${esc(w)}</option>`).join("");
+  } catch {}
+}
+
+/* drawer */
+const PERM = ["Sahib","Qrup","Digərləri"];
+function permGrid(oldM, newM){
+  const bits = m => { const v = parseInt(m,8); return [6,3,0].map(s => [(v>>s)&4,(v>>s)&2,(v>>s)&1]); };
+  const o = oldM ? bits(oldM) : null, n = bits(newM);
+  const letters = ["r","w","x"];
+  const sym = m => bits(m).map(t => t.map((b,i)=> b? letters[i]:"-").join("")).join("");
+  let h = `<div class="arrow">${oldM?`<span class="o">${esc(oldM)} · ${sym(oldM)}</span> →`:""} <span class="n">${esc(newM)} · ${sym(newM)}</span></div><div class="perm">`;
+  PERM.forEach((p, r) => {
+    h += `<span class="r">${p}</span><div class="trip" style="grid-column:span 3;justify-content:flex-start">` +
+      n[r].map((b,i) => `<span class="${b?"y":""}${o && (!!o[r][i] !== !!b) ? " chg":""}" title="${["oxuma","yazma","icra"][i]}">${b?letters[i]:"–"}</span>`).join("") + `</div>`;
+  });
+  h += `</div><div class="note">Narıncı xanalar dəyişən icazələrdir. r = oxuma, w = yazma, x = icra.</div>`;
+  return h;
+}
+function openDrawer(ev){
+  st.sel = ev.id;
+  document.querySelectorAll(".row.sel").forEach(r => r.classList.remove("sel"));
+  document.querySelector(`.row[data-id="${ev.id}"]`)?.classList.add("sel");
+  const [, name] = split(ev.path || "");
+  $("dBadge").innerHTML = badge(ev);
+  $("dTitle").textContent = name;
+  const tname = {dir:"Qovluq", file:"Fayl", link:"Link"}[ev.ftype] || "Fayl";
+  const realU = ev.auser || "sistem (giriş edilməyib)";
+  let h = `<dl class="kv">
+    <dt>Tam yol</dt><dd><code>${esc(ev.path)}</code></dd>
+    ${ev.path2 ? `<dt>Yeni yol</dt><dd><code>${esc(ev.path2)}</code></dd>` : ""}
+    <dt>Növ</dt><dd>${tname}</dd>
+    <dt>Vaxt</dt><dd>${esc(fmtFull(ev.ts))}</dd>
+    <dt>Kim etdi</dt><dd><b>${esc(realU)}</b></dd>
+    <dt>Hansı hüquqla</dt><dd>${esc(ev.euser || "—")}${ev.auser && ev.euser && ev.euser!==ev.auser ? ` <span style="color:var(--c-chmod)">(sudo / su ilə)</span>`:""}</dd>
+    <dt>Proqram</dt><dd><code>${esc(ev.exe || "—")}</code></dd>
+    <dt>Terminal</dt><dd>${esc(ev.tty && ev.tty !== "(none)" ? ev.tty : "qrafik / arxa fon")}</dd>
+    <dt>Nəticə</dt><dd>${ev.success ? `<span style="color:var(--c-create)">Uğurlu</span>` : `<span style="color:var(--c-denied)">İcazə verilmədi</span>`}</dd>
+    <dt>Qovluq qrupu</dt><dd>${esc(ev.watch)}</dd>
+  </dl>`;
+  if (ev.action === "chmod" && ev.new_mode) h += `<div class="sec"><h4>İcazə dəyişikliyi</h4>${permGrid(ev.old_mode, ev.new_mode)}</div>`;
+  if (ev.action === "chown") h += `<div class="sec"><h4>Sahib dəyişikliyi</h4><div class="arrow"><span class="o">${esc(ev.old_owner||"?")}</span> → <span class="n" style="color:var(--c-chown)">${esc(ev.new_owner||"?")}</span></div><div class="note">istifadəçi:qrup formatında</div></div>`;
+  if (ev.cmd) h += `<div class="sec"><h4>İşlədilən əmr</h4><div class="cmd">${esc(ev.cmd)}</div></div>`;
+  $("dBody").innerHTML = h;
+  $("drawer").classList.add("open"); $("scrim").classList.add("open");
+  $("drawer").setAttribute("aria-hidden","false");
+}
+function closeDrawer(){
+  $("drawer").classList.remove("open"); $("scrim").classList.remove("open");
+  $("drawer").setAttribute("aria-hidden","true");
+  st.sel = null; document.querySelectorAll(".row.sel").forEach(r => r.classList.remove("sel"));
+}
+$("close").onclick = closeDrawer; $("scrim").onclick = closeDrawer;
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+$("rows").addEventListener("click", e => {
+  const r = e.target.closest(".row"); if (!r) return;
+  const ev = st.rows.find(x => x.id == r.dataset.id); if (ev) openDrawer(ev);
+});
+
+/* filters */
+function refresh(){ loadEvents().catch(()=>setLive(false)); }
+$("stats").addEventListener("click", e => {
+  const b = e.target.closest(".stat"); if (!b) return;
+  st.action = b.dataset.k === "all" || st.action === b.dataset.k ? "" : b.dataset.k;
+  document.querySelectorAll(".stat").forEach(x => x.classList.toggle("on", (st.action||"all") === x.dataset.k));
+  refresh();
+});
+let qt; $("q").addEventListener("input", e => { clearTimeout(qt); qt = setTimeout(() => { st.q = e.target.value.trim(); refresh(); }, 250); });
+$("user").onchange = e => { st.user = e.target.value; refresh(); };
+$("watch").onchange = e => { st.watch = e.target.value; refresh(); };
+$("hidden").onchange = e => { st.hidden = e.target.checked; try{localStorage.setItem("fa.hidden", st.hidden?"1":"0")}catch{} refresh(); loadStats(); };
+$("users").addEventListener("click", e => { const li = e.target.closest("[data-user]"); if (!li) return; st.user = li.dataset.user; $("user").value = st.user; refresh(); });
+$("paths").addEventListener("click", e => { const li = e.target.closest("[data-q]"); if (!li) return; st.q = li.dataset.q; $("q").value = st.q; refresh(); });
+$("reset").onclick = () => {
+  Object.assign(st, {action:"", q:"", user:"", watch:""});
+  $("q").value = ""; $("user").value = ""; $("watch").value = "";
+  document.querySelectorAll(".stat").forEach(x => x.classList.toggle("on", x.dataset.k === "all"));
+  refresh();
+};
+
+loadMeta(); loadStats().catch(()=>setLive(false)); refresh();
+setInterval(poll, 2500);
+setInterval(() => loadStats().catch(()=>{}), 15000);
+setInterval(() => document.querySelectorAll(".row").length && render(), 30000);
+</script>
+</body>
+</html>

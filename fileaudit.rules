@@ -1,0 +1,8 @@
+# FileAudit dashboard: watch create/delete/modify/attribute changes
+-b 8192
+-w /home -p wa -k fa_home
+-w /etc -p wa -k fa_etc
+-w /root -p wa -k fa_root
+# Denied attempts by logged-in users (collector keeps only watched folders)
+-a always,exit -F arch=b64 -S creat,open,openat,openat2,truncate,mkdir,mkdirat,rmdir,unlink,unlinkat,rename,renameat,renameat2,chmod,fchmodat,chown,lchown,fchownat,link,linkat,symlink,symlinkat -F exit=-EACCES -F auid>=1000 -F auid!=unset -k fa_denied
+-a always,exit -F arch=b64 -S creat,open,openat,openat2,truncate,mkdir,mkdirat,rmdir,unlink,unlinkat,rename,renameat,renameat2,chmod,fchmodat,chown,lchown,fchownat,link,linkat,symlink,symlinkat -F exit=-EPERM -F auid>=1000 -F auid!=unset -k fa_denied
