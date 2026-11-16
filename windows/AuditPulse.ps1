@@ -152,7 +152,9 @@ function Get-UnixNow { [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.
 
 function Test-HiddenPath([string]$Path) {
     foreach ($seg in $Path.Split('\')) {
-        if ($seg.StartsWith('.') -or $seg.StartsWith('~$') -or $seg -eq 'AppData' -or $seg -eq '$RECYCLE.BIN') { return $true }
+        # Dot folders (.git, .venv, .next…), Office lock files, app data and build/dependency folders
+        # change constantly; they are kept but hidden by default, like dot files on Linux.
+        if ($seg.StartsWith('.') -or $seg.StartsWith('~$') -or $seg -in @('AppData', '$RECYCLE.BIN', 'node_modules', '__pycache__')) { return $true }
     }
     return ($Path -match '\.(tmp|temp|crdownload|partial)$')
 }
