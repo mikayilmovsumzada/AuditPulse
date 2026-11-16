@@ -302,7 +302,9 @@ function Flush-Pending {
         $script:Recent[$key] = $now
         $sec = Find-Sec $(if ($p.old) { $p.old } else { $path }) $p.seen
         if (-not $sec -and $p.old) { $sec = Find-Sec $path $p.seen }
-        if (-not $sec -and $action -eq 'create') { $sec = Find-Sec (Split-Path -Parent $path) $p.seen }
+        # Creating and deleting are often checked against the folder (AddFile / DeleteChild), so
+        # Windows logs the parent folder instead of the file itself.
+        if (-not $sec -and $action -in @('create', 'delete', 'rename')) { $sec = Find-Sec (Split-Path -Parent $(if ($p.old) { $p.old } else { $path })) $p.seen }
         $user = if ($sec) { $sec.user } else { $null }
         $exe = if ($sec) { $sec.exe } else { $null }
         Add-AuditEvent @{ ts = $p.seen; action = $action; ftype = $(if ($isDir) { 'dir' } else { 'file' })
