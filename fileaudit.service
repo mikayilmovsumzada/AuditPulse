@@ -6,6 +6,8 @@ Wants=auditd.service
 [Service]
 ExecStart=/usr/bin/python3 /opt/fileaudit/fileaudit.py
 Environment=FA_HOST=127.0.0.1 FA_PORT=8088
+# FA_PASSWORD, FA_ALLOWED_HOSTS and overrides of FA_HOST go here (root-only file, mode 600).
+EnvironmentFile=-/etc/fileaudit.env
 Restart=always
 RestartSec=3
 

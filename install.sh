@@ -30,6 +30,8 @@ mkdir -p /opt/fileaudit/web /var/lib/fileaudit
 install -m 755 fileaudit.py /opt/fileaudit/fileaudit.py
 install -m 644 web/index.html /opt/fileaudit/web/index.html
 install -m 644 fileaudit.service /etc/systemd/system/fileaudit.service
+[ -f /etc/fileaudit.env ] || install -m 600 /dev/null /etc/fileaudit.env
+chmod 700 /var/lib/fileaudit
 
 echo "[4/4] Xidmət işə salınır..."
 systemctl daemon-reload

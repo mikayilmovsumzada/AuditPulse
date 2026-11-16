@@ -14,6 +14,7 @@ systemctl daemon-reload
 rm -f /etc/audit/rules.d/fileaudit.rules
 augenrules --load >/dev/null 2>&1
 rm -rf /opt/fileaudit
+rm -f /etc/fileaudit.env  # panel parolu
 [ "${1:-}" = "--hamisi" ] && rm -rf /var/lib/fileaudit
 
 echo "Fayl Audit Paneli silindi. (auditd özü sistemdə qalır)"

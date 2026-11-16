@@ -3,7 +3,10 @@
 
 Runs as root (needs /var/log/audit/audit.log). Stdlib only.
 """
+import base64
 import grp
+import hmac
+import ipaddress
 import json
 import os
 import pwd
@@ -19,6 +22,12 @@ LOG = os.environ.get("FA_LOG", "/var/log/audit/audit.log")
 DB = os.environ.get("FA_DB", "/var/lib/fileaudit/events.db")
 HOST = os.environ.get("FA_HOST", "127.0.0.1")
 PORT = int(os.environ.get("FA_PORT", "8088"))
+# Optional panel password (HTTP Basic auth, any user name). Required when HOST is not loopback.
+PASSWORD = os.environ.get("FA_PASSWORD", "")
+# Extra host names the panel may be opened by (comma-separated), e.g. "audit.lan,192.168.1.20".
+ALLOWED_HOSTS = {h.strip().lower() for h in os.environ.get("FA_ALLOWED_HOSTS", "").split(",") if h.strip()}
+AUTH_WINDOW = 15 * 60
+AUTH_MAX_FAILS = 5
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_ROWS = 200_000
 KEY_PREFIX = "fa_"
@@ -327,7 +336,9 @@ def db_connect():
 
 
 def db_init():
-    os.makedirs(os.path.dirname(DB), exist_ok=True)
+    # Commands can contain secrets typed on the command line: only root may read the database.
+    os.makedirs(os.path.dirname(DB), mode=0o700, exist_ok=True)
+    os.chmod(os.path.dirname(DB), 0o700)
     con = db_connect()
     con.executescript("""
     CREATE TABLE IF NOT EXISTS events (
@@ -474,7 +485,7 @@ def query_events(con, qs):
         where.append("(path LIKE ? OR path2 LIKE ? OR exe LIKE ? OR cmd LIKE ?)"); args += [like] * 4
     if g("from"):
         where.append("ts >= ?"); args.append(float(g("from")))
-    limit = min(int(g("limit") or 100), 500)
+    limit = max(1, min(int(g("limit") or 100), 500))  # -1 would mean "no limit" in SQLite
     sql = "SELECT * FROM events" + (" WHERE " + " AND ".join(where) if where else "") + \
           " ORDER BY id DESC LIMIT ?"
     return [dict(r) for r in con.execute(sql, args + [limit])]
@@ -498,6 +509,62 @@ def query_stats(con, qs):
                 top_paths=top, now=time.time())
 
 
+def is_loopback(host):
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def host_allowed(header):
+    """Blocks DNS rebinding: a web page on another domain must not reach the panel via 127.0.0.1."""
+    if not header:
+        return False
+    name = header.strip().lower()
+    if name.startswith("["):  # [::1]:8088
+        name = name[1:].split("]")[0]
+    elif name.count(":") == 1:
+        name = name.split(":")[0]
+    allowed = {"127.0.0.1", "localhost", "::1"} | ALLOWED_HOSTS
+    if not is_loopback(HOST) and HOST not in ("0.0.0.0", "::"):
+        allowed.add(HOST.lower())
+    return name in allowed
+
+
+_fails = {}  # client ip -> [timestamps]
+_fails_lock = threading.Lock()
+
+
+def auth_locked(ip):
+    now = time.time()
+    with _fails_lock:
+        recent = [t for t in _fails.get(ip, []) if t > now - AUTH_WINDOW]
+        if recent:
+            _fails[ip] = recent
+        else:
+            _fails.pop(ip, None)
+        return len(recent) >= AUTH_MAX_FAILS
+
+
+def auth_failed(ip):
+    with _fails_lock:
+        if len(_fails) > 10_000:
+            _fails.clear()
+        _fails.setdefault(ip, []).append(time.time())
+
+
+def password_ok(header):
+    if not header or not header.startswith("Basic "):
+        return False
+    try:
+        _, _, given = base64.b64decode(header[6:], validate=True).decode("utf-8").partition(":")
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return hmac.compare_digest(given.encode(), PASSWORD.encode())
+
+
 class Handler(BaseHTTPRequestHandler):
     con = None
     lock = threading.Lock()
@@ -505,16 +572,45 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def send(self, code, body, ctype):
+    def send(self, code, body, ctype, extra=None):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                         "img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; "
+                         "form-action 'none'; frame-ancestors 'none'")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def gate(self):
+        """Host check and optional password. Returns True when the request may continue."""
+        if not host_allowed(self.headers.get("Host")):
+            self.send(421, b"unknown host", "text/plain")
+            return False
+        if not PASSWORD:
+            return True
+        ip = self.client_address[0]
+        if auth_locked(ip):
+            self.send(429, b"too many failed logins, try again in 15 minutes", "text/plain",
+                      {"Retry-After": str(AUTH_WINDOW)})
+            return False
+        if password_ok(self.headers.get("Authorization")):
+            return True
+        if self.headers.get("Authorization"):
+            auth_failed(ip)
+        self.send(401, b"password required", "text/plain", {"WWW-Authenticate": 'Basic realm="AuditPulse"'})
+        return False
+
     def do_GET(self):
+        if not self.gate():
+            return
         u = urlparse(self.path)
         qs = parse_qs(u.query)
         try:
@@ -532,11 +628,14 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 return self.send(404, b"not found", "text/plain")
             self.send(200, json.dumps(data).encode(), "application/json")
-        except (ValueError, sqlite3.Error) as exc:
-            self.send(400, json.dumps(dict(error=str(exc))).encode(), "application/json")
+        except (ValueError, sqlite3.Error):
+            self.send(400, json.dumps(dict(error="invalid request")).encode(), "application/json")
 
 
 def main():
+    if not is_loopback(HOST) and not PASSWORD:
+        raise SystemExit(f"FA_HOST={HOST} opens the panel to the network: set FA_PASSWORD first "
+                         "(in /etc/fileaudit.env). Refusing to start without a password.")
     for d, k in watch_rules():
         ROOTS.setdefault(k, []).append(d)
     Collector().start()
