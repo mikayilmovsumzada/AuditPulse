@@ -147,6 +147,7 @@ select{padding:9px 10px;border-radius:10px;border:1px solid var(--border);backgr
 .note{font-size:12px;color:var(--muted);margin-top:8px}
 /* folder manager */
 button.chip{cursor:pointer;font:inherit;font-size:12px}
+.chip.warn{color:var(--c-chmod);border-color:var(--c-chmod-bg);background:var(--c-chmod-bg)}
 #watched{max-width:min(520px,100%);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block}
 button.chip:hover{color:var(--text);border-color:var(--faint)}
 .wlist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
@@ -199,6 +200,7 @@ button.chip:hover{color:var(--text);border-color:var(--faint)}
     <div class="hdr-right">
       <span class="chip" id="host">—</span>
       <button type="button" class="chip" id="watched" title="İzlənən qovluqları idarə et">İzlənir: —</button>
+      <span class="chip warn" id="secwarn" hidden title="Windows Security logu oxunmur: kim etdi və hansı proqram görünməyəcək. Servis SYSTEM kimi işləməli və fayl auditi yandırılmalıdır (Install-AuditPulse.ps1).">İstifadəçi məlumatı yoxdur</span>
       <span class="chip live" id="live"><span class="dot"></span><span id="liveTxt">Canlı</span></span>
     </div>
   </header>
@@ -278,7 +280,10 @@ function badge(ev){
   const a = kind(ev);
   return `<span class="badge" style="--k:var(--c-${a.k});--kb:var(--c-${a.k}-bg)">${svg(a.i,13)}${a.t}</span>`;
 }
-function split(p){ const i = p.lastIndexOf("/"); return i <= 0 ? ["/", p.slice(1) || "/"] : [p.slice(0,i), p.slice(i+1)]; }
+function split(p){
+  if (/^[A-Za-z]:\\/.test(p)) { const i = p.lastIndexOf("\\"); return i <= 2 ? [p.slice(0,3), p.slice(3) || p] : [p.slice(0,i), p.slice(i+1)]; }  // Windows
+  const i = p.lastIndexOf("/"); return i <= 0 ? ["/", p.slice(1) || "/"] : [p.slice(0,i), p.slice(i+1)];
+}
 const COLORS = ["#3b5bdb","#1f9d55","#d6336c","#e67700","#7048e8","#0c8599","#c2255c","#5c940d"];
 function avColor(n){ let h=0; for (const c of n) h = (h*31 + c.charCodeAt(0)) >>> 0; return COLORS[h % COLORS.length]; }
 function who(ev){
@@ -412,6 +417,11 @@ async function loadMeta(){
   try {
     const m = await api("/api/meta");
     st.meta = m;
+    if (m.platform === "windows") {
+      A.chmod.t = "İcazə dəyişdi"; A.chown.t = "Sahib dəyişdi";
+      const warn = $("secwarn");
+      if (warn) warn.hidden = m.security_log !== "unavailable";
+    }
     $("host").innerHTML = `${svg('<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/>',13)} <code>${esc(m.host)}</code>`;
     $("watched").innerHTML = `${svg('<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',13)} İzlənir: ${m.watched.map(w => `<code>${esc(w.dir)}</code>`).join(", ") || "—"}`;
     const cur = $("watch").value;
@@ -453,12 +463,13 @@ function openDrawer(ev){
     <dt>Kim etdi</dt><dd><b>${esc(realU)}</b></dd>
     <dt>Hansı hüquqla</dt><dd>${esc(ev.euser || "—")}${ev.auser && ev.euser && ev.euser!==ev.auser ? ` <span style="color:var(--c-chmod)">(sudo / su ilə)</span>`:""}</dd>
     <dt>Proqram</dt><dd><code>${esc(ev.exe || "—")}</code></dd>
-    <dt>Terminal</dt><dd>${esc(ev.tty && ev.tty !== "(none)" ? ev.tty : "qrafik / arxa fon")}</dd>
+    ${st.meta && st.meta.platform === "windows" ? "" : `<dt>Terminal</dt><dd>${esc(ev.tty && ev.tty !== "(none)" ? ev.tty : "qrafik / arxa fon")}</dd>`}
     <dt>Nəticə</dt><dd>${ev.success ? `<span style="color:var(--c-create)">Uğurlu</span>` : `<span style="color:var(--c-denied)">İcazə verilmədi</span>`}</dd>
     <dt>Qovluq qrupu</dt><dd>${esc(ev.watch)}</dd>
   </dl>`;
   if (ev.action === "chmod" && ev.new_mode) h += `<div class="sec"><h4>İcazə dəyişikliyi</h4>${permGrid(ev.old_mode, ev.new_mode)}</div>`;
   if (ev.action === "chown") h += `<div class="sec"><h4>Sahib dəyişikliyi</h4><div class="arrow"><span class="o">${esc(ev.old_owner||"?")}</span> → <span class="n" style="color:var(--c-chown)">${esc(ev.new_owner||"?")}</span></div><div class="note">istifadəçi:qrup formatında</div></div>`;
+  if (ev.sd_new) h += `<div class="sec"><h4>İcazələr (SDDL)</h4><div class="note" style="margin:0 0 6px">Əvvəl</div><div class="cmd">${esc(ev.sd_old || "?")}</div><div class="note" style="margin:10px 0 6px">İndi</div><div class="cmd">${esc(ev.sd_new)}</div></div>`;
   if (ev.cmd) h += `<div class="sec"><h4>İşlədilən əmr</h4><div class="cmd">${esc(ev.cmd)}</div></div>`;
   $("dBody").innerHTML = h;
   $("drawer").classList.add("open"); $("scrim").classList.add("open");
@@ -492,9 +503,13 @@ function renderFolders(msg){
     : `<li><span class="note" style="margin:0">Heç bir qovluq izlənmir.</span></li>`) + `</ul>`;
   if (edit) {
     h += `<div class="sec"><h4>Qovluq əlavə et</h4>
-      <form class="addrow" id="addForm" autocomplete="off"><input id="addPath" placeholder="/var/www" spellcheck="false" aria-label="Qovluğun tam yolu"><button class="btn primary" type="submit">Əlavə et</button></form>
+      <form class="addrow" id="addForm" autocomplete="off"><input id="addPath" placeholder="${m.platform === "windows" ? "C:\\inetpub" : "/var/www"}" spellcheck="false" aria-label="Qovluğun tam yolu"><button class="btn primary" type="submit">Əlavə et</button></form>
       ${m.suggestions.length ? `<div class="note">Bu kompüterdə olan tövsiyələr (bir kliklə əlavə olunur):</div><div class="sugg">${m.suggestions.map(s => `<button class="chip" type="button" data-add="${esc(s)}">+ ${esc(s)}</button>`).join("")}</div>` : ""}
-      <div class="note">Ən çoxu ${m.max_watches} qovluq. Sistem qovluqları (/proc, /sys, /dev, /run) və bütün sistem (/) izlənə bilməz. Dəyişiklik dərhal tətbiq olunur və yenidən başladıqdan sonra da qalır.</div></div>`;
+      <div class="note">Ən çoxu ${m.max_watches} qovluq. ${m.platform === "windows" ? "Bütün disk (C:\\), Windows və Program Files qovluqları" : "Sistem qovluqları (/proc, /sys, /dev, /run) və bütün sistem (/)"} izlənə bilməz. Dəyişiklik dərhal tətbiq olunur və yenidən başladıqdan sonra da qalır.</div></div>`;
+  } else if (m.platform === "windows") {
+    h += `<div class="sec"><h4>Paneldən dəyişmək</h4><div class="lockbox">Qovluq siyahısını paneldən dəyişmək üçün panelə parol qoyulmalıdır, yoxsa kompüterdəki istənilən istifadəçi izləməni söndürə bilər.<br><br>
+      PowerShell-i <b>administrator kimi</b> açıb AuditPulse qovluğunda işlədin:<br><code>.\\windows\\Install-AuditPulse.ps1 -SetPassword</code><br><br>
+      Parolsuz da qovluq əlavə etmək olar: <code>.\\windows\\Install-AuditPulse.ps1 -Watch "C:\\inetpub"</code></div></div>`;
   } else {
     h += `<div class="sec"><h4>Paneldən dəyişmək</h4><div class="lockbox">Qovluq siyahısını paneldən dəyişmək üçün panelə parol qoyulmalıdır, yoxsa kompüterdəki istənilən istifadəçi izləməni söndürə bilər.<br><br>
       1. <code>sudo nano /etc/fileaudit.env</code><br>2. <code>FA_PASSWORD=uzun-ve-guclu-parol</code> sətrini yazın<br>3. <code>sudo systemctl restart fileaudit</code><br><br>
