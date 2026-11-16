@@ -200,24 +200,32 @@ Qovluğu izləmədən çıxarmaq üçün də eyni yolla həmin sətri silin və 
 
 ### Paneli şəbəkədən açmaq
 
-Susmaya görə panel yalnız həmin kompüterdə açılır. Şəbəkədəki başqa kompüterdən açmaq üçün:
+Susmaya görə panel yalnız həmin kompüterdə açılır. Şəbəkədən açmaq üçün **parol məcburidir**: parol olmadan panel şəbəkəyə açılmır, xidmət başlamır.
 
-1. Xidmət faylını açın:
-   ```bash
-   sudo nano /etc/systemd/system/fileaudit.service
-   ```
-2. `FA_HOST=127.0.0.1` dəyərini `FA_HOST=0.0.0.0` ilə əvəz edin, yadda saxlayıb çıxın.
-3. Xidməti yenidən başladın:
-   ```bash
-   sudo systemctl daemon-reload && sudo systemctl restart fileaudit
-   ```
-4. Kali-nin IP ünvanını öyrənin:
+1. Kali-nin IP ünvanını öyrənin:
    ```bash
    ip -4 addr show | grep inet
    ```
-5. Başqa kompüterdə brauzerə `http://KALI_IP:8088` yazın.
+2. Ayar faylını açın. Bu faylı yalnız `root` oxuya bilir:
+   ```bash
+   sudo nano /etc/fileaudit.env
+   ```
+3. Bu sətirləri yazın (`KALI_IP` əvəzinə öz IP-nizi, parol əvəzinə uzun və güclü bir parol):
+   ```
+   FA_HOST=0.0.0.0
+   FA_PASSWORD=uzun-ve-guclu-bir-parol
+   FA_ALLOWED_HOSTS=KALI_IP
+   ```
+   Yadda saxlayın (`Ctrl + O`, Enter) və çıxın (`Ctrl + X`).
+4. Xidməti yenidən başladın:
+   ```bash
+   sudo systemctl daemon-reload && sudo systemctl restart fileaudit
+   ```
+5. Başqa kompüterdə brauzerə `http://KALI_IP:8088` yazın. Brauzer parol soruşacaq: istifadəçi adına istənilən söz yaza bilərsiniz, parol yuxarıda yazdığınız `FA_PASSWORD`-dur.
 
-> **Diqqət:** panelin giriş parolu yoxdur. Şəbəkədəki hər kəs hadisələri görə bilər. Bunu yalnız etibarlı şəbəkədə edin.
+> **Diqqət:** panel HTTP ilə işləyir, yəni parol şəbəkədə şifrələnmədən ötürülür. Bunu yalnız etibarlı şəbəkədə edin. Bir IP ünvanından 5 səhv parol cəhdi olsa, həmin ünvan 15 dəqiqəlik bloklanır.
+
+`FA_PASSWORD` həmin kompüterdə də (`127.0.0.1`) panelə parol qoyur. Kompüterdən başqa istifadəçilər də istifadə edirsə, parol qoymağınız tövsiyə olunur: əks halda onlar da paneli açıb hamının işlətdiyi əmrləri görə bilər.
 
 ### Portu dəyişmək
 
