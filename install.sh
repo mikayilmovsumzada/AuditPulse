@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
 # Fayl Audit Paneli - quraşdırma (Kali / Debian / Ubuntu)
-# İstifadə: sudo bash install.sh
+# İstifadə: sudo bash install.sh [--watch QOVLUQ]... [--unwatch QOVLUQ]...
+#   --watch /var/www     bu qovluğu da izlə (bir neçə dəfə yazmaq olar)
+#   --unwatch /root      bu qovluğu izləmədən çıxar
+# Yenidən quraşdıranda paneldən və ya --watch ilə seçilmiş qovluqlar saxlanılır.
 set -euo pipefail
+
+RULE_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --watch|--unwatch)
+      [ $# -ge 2 ] || { echo "$1 üçün qovluq yazın, məsələn: $1 /var/www"; exit 1; }
+      RULE_ARGS+=("$1" "$2"); shift 2 ;;
+    *) echo "Naməlum seçim: $1  (istifadə: sudo bash install.sh [--watch QOVLUQ] [--unwatch QOVLUQ])"; exit 1 ;;
+  esac
+done
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Bu skripti sudo ilə işlədin:  sudo bash install.sh"
@@ -22,7 +35,7 @@ command -v python3 >/dev/null || DEBIAN_FRONTEND=noninteractive apt-get install 
 systemctl enable --now auditd >/dev/null 2>&1 || service auditd start
 
 echo "[2/4] Audit qaydaları yüklənir..."
-install -m 640 fileaudit.rules /etc/audit/rules.d/fileaudit.rules
+python3 fileaudit.py --install-rules fileaudit.rules ${RULE_ARGS[@]+"${RULE_ARGS[@]}"}
 augenrules --load >/dev/null 2>&1 || auditctl -R /etc/audit/rules.d/fileaudit.rules >/dev/null
 
 echo "[3/4] Proqram /opt/fileaudit qovluğuna köçürülür..."

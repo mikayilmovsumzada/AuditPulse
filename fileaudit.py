@@ -13,6 +13,7 @@ import pwd
 import re
 import sqlite3
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,14 @@ PASSWORD = os.environ.get("FA_PASSWORD", "")
 ALLOWED_HOSTS = {h.strip().lower() for h in os.environ.get("FA_ALLOWED_HOSTS", "").split(",") if h.strip()}
 AUTH_WINDOW = 15 * 60
 AUTH_MAX_FAILS = 5
+# Persistent audit rules (loaded at boot by augenrules). The panel edits only our own -w lines.
+RULES_FILE = os.environ.get("FA_RULES", "/etc/audit/rules.d/fileaudit.rules")
+MAX_WATCHES = 16
+# Never watched: virtual file systems, the audit log itself and our own database (would loop forever).
+FORBIDDEN_ROOTS = ("/proc", "/sys", "/dev", "/run", "/var/log/audit")
+# Offered in the panel as one-click choices when they exist on this machine.
+SUGGESTED_DIRS = ("/var/www", "/srv", "/opt", "/etc/nginx", "/etc/apache2", "/etc/ssh", "/etc/cron.d",
+                  "/var/spool/cron", "/usr/local/bin", "/home", "/etc", "/root")
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 MAX_ROWS = 200_000
 KEY_PREFIX = "fa_"
@@ -456,6 +465,147 @@ def watched_dirs():
     return [d for d, k in watch_rules() if k != KEY_PREFIX + "denied"]
 
 
+def watched():
+    """[{dir, key}] for folder watches (the panel's folder filter uses the key)."""
+    return [dict(dir=d, key=k[len(KEY_PREFIX):]) for d, k in watch_rules() if k != KEY_PREFIX + "denied"]
+
+
+def _inside(path, root):
+    return path == root or path.startswith(root.rstrip("/") + "/")
+
+
+def check_new_watch(raw, current):
+    """Validated absolute directory path, or ValueError with a message for the panel."""
+    if not isinstance(raw, str) or not raw.startswith("/") or len(raw) > 200:
+        raise ValueError("Tam yol yazın, məsələn /var/www")
+    if any(c.isspace() or ord(c) < 32 for c in raw):
+        raise ValueError("Yolda boşluq və ya xüsusi simvol ola bilməz")
+    path = os.path.realpath(raw)
+    if not os.path.isdir(path):
+        raise ValueError(f"Belə qovluq yoxdur: {path}")
+    if path == "/":
+        raise ValueError("Bütün sistemi (/) izləmək olmaz: hər saniyə minlərlə hadisə yaranar")
+    for root in FORBIDDEN_ROOTS + (os.path.dirname(DB),):
+        if _inside(path, root) or _inside(root, path):
+            raise ValueError(f"{root} izlənə bilməz (sistem qovluğudur və ya panelin öz faylları oradadır)")
+    for d in current:
+        if _inside(path, d):
+            raise ValueError(f"{path} artıq izlənir ({d} qovluğunun içindədir)")
+        if _inside(d, path):
+            raise ValueError(f"{path} artıq izlənən {d} qovluğunu əhatə edir. Əvvəlcə {d}-ni çıxarın")
+    if len(current) >= MAX_WATCHES:
+        raise ValueError(f"Ən çoxu {MAX_WATCHES} qovluq izlənə bilər")
+    return path
+
+
+def new_key(path, taken):
+    base = re.sub(r"[^a-z0-9]+", "_", path.lower()).strip("_")[:20] or "dir"
+    key, n = KEY_PREFIX + base, 2
+    while key in taken or key == KEY_PREFIX + "denied":
+        key, n = f"{KEY_PREFIX}{base[:17]}_{n}", n + 1
+    return key
+
+
+_rules_lock = threading.Lock()
+
+
+def _save_rules(lines):
+    tmp = RULES_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("".join(lines))
+    os.chmod(tmp, 0o640)
+    os.replace(tmp, RULES_FILE)
+
+
+def _auditctl(*args):
+    r = subprocess.run(["auditctl", *args], capture_output=True, text=True, timeout=5)
+    if r.returncode != 0:
+        raise RuntimeError((r.stderr or r.stdout).strip() or "auditctl failed")
+
+
+def add_watch(raw):
+    with _rules_lock:
+        rules = watch_rules()
+        path = check_new_watch(raw, [d for d, k in rules if k != KEY_PREFIX + "denied"])
+        key = new_key(path, {k for _, k in rules})
+        line = f"-w {path} -p wa -k {key}\n"
+        with open(RULES_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+        last_w = max((i for i, l in enumerate(lines) if l.startswith("-w ")), default=len(lines) - 1)
+        _save_rules(lines[:last_w + 1] + [line] + lines[last_w + 1:])
+        try:
+            _auditctl("-w", path, "-p", "wa", "-k", key)
+        except Exception:
+            _save_rules(lines)  # keep the file and the live rules in sync
+            raise
+        ROOTS.setdefault(key, []).append(path)
+        print(f"[watch] added {path} ({key})", flush=True)
+        return path
+
+
+def remove_watch(raw):
+    with _rules_lock:
+        match = [(d, k) for d, k in watch_rules() if d == raw and k != KEY_PREFIX + "denied"]
+        if not match:
+            raise ValueError("Bu qovluq izlənmir")
+        path, key = match[0]
+        with open(RULES_FILE, encoding="utf-8") as f:
+            lines = f.readlines()
+        pattern = re.compile(r"^-w " + re.escape(path) + r" .*-k " + re.escape(key) + r"\s*$")
+        _save_rules([l for l in lines if not pattern.match(l)])
+        try:
+            _auditctl("-W", path, "-p", "wa", "-k", key)
+        except Exception:
+            _save_rules(lines)
+            raise
+        ROOTS.pop(key, None)
+        print(f"[watch] removed {path} ({key})", flush=True)
+        return path
+
+
+WATCH_LINE = re.compile(r"^-w (\S+) .*-k (" + KEY_PREFIX + r"\S+)\s*$")
+
+
+def install_rules(template, add=(), remove=()):
+    """Used by install.sh: writes RULES_FILE from the template but keeps the folders already chosen
+    (in the panel or with --watch), then applies --watch / --unwatch. Prints the result."""
+    with open(template, encoding="utf-8") as f:
+        tpl = f.readlines()
+    keep = None
+    if os.path.exists(RULES_FILE):
+        with open(RULES_FILE, encoding="utf-8") as f:
+            keep = [l if l.endswith("\n") else l + "\n" for l in f if WATCH_LINE.match(l)]
+    if keep is not None:
+        first = next((i for i, l in enumerate(tpl) if WATCH_LINE.match(l)), len(tpl))
+        tpl = [l for l in tpl if not WATCH_LINE.match(l)]
+        tpl[first:first] = keep
+    for raw in remove:
+        path = os.path.realpath(raw)
+        before = len(tpl)
+        tpl = [l for l in tpl if not (WATCH_LINE.match(l) and WATCH_LINE.match(l).group(1) == path)]
+        print(f"  - {path}" if len(tpl) < before else f"  ! {path} izlənmirdi")
+    for raw in add:
+        current = [(m.group(1), m.group(2)) for m in map(WATCH_LINE.match, tpl) if m]
+        try:
+            path = check_new_watch(raw, [d for d, _ in current])
+        except ValueError as exc:
+            print(f"  ! {raw}: {exc}")
+            continue
+        key = new_key(path, {k for _, k in current})
+        last = max((i for i, l in enumerate(tpl) if WATCH_LINE.match(l)), default=len(tpl) - 1)
+        tpl.insert(last + 1, f"-w {path} -p wa -k {key}\n")
+        print(f"  + {path}")
+    _save_rules(tpl)
+
+
+def suggestions(current):
+    out = []
+    for d in SUGGESTED_DIRS:
+        if os.path.isdir(d) and not any(_inside(d, c) or _inside(c, d) for c in current):
+            out.append(d)
+    return out
+
+
 ROOTS = {}  # audit key -> [watched dir], filled at startup
 
 
@@ -621,7 +771,9 @@ class Handler(BaseHTTPRequestHandler):
                 with self.lock:
                     data = query_stats(self.con, qs)
             elif u.path == "/api/meta":
-                data = dict(host=os.uname().nodename, watched=watched_dirs())
+                w = watched()
+                data = dict(host=os.uname().nodename, watched=w, can_edit=bool(PASSWORD),
+                            suggestions=suggestions([x["dir"] for x in w]), max_watches=MAX_WATCHES)
             elif u.path in ("/", "/index.html"):
                 with open(os.path.join(WEB, "index.html"), "rb") as f:
                     return self.send(200, f.read(), "text/html; charset=utf-8")
@@ -632,7 +784,62 @@ class Handler(BaseHTTPRequestHandler):
             self.send(400, json.dumps(dict(error="invalid request")).encode(), "application/json")
 
 
+def _same_origin(handler):
+    """CSRF guard: the browser sends Basic auth to any site, so writes need our own header and origin."""
+    if handler.headers.get("X-AuditPulse") != "1":
+        return False
+    origin = handler.headers.get("Origin")
+    if origin:
+        return host_allowed(urlparse(origin).netloc) and urlparse(origin).netloc == handler.headers.get("Host")
+    return True
+
+
+def do_POST(self):
+    if not self.gate():
+        return
+    if urlparse(self.path).path != "/api/watches":
+        return self.send(404, b"not found", "text/plain")
+    reply = lambda code, **d: self.send(code, json.dumps(d).encode(), "application/json")
+    if not PASSWORD:
+        return reply(403, error="Qovluqları paneldən dəyişmək üçün əvvəlcə FA_PASSWORD təyin edin (README).")
+    if not _same_origin(self):
+        return reply(403, error="forbidden")
+    try:
+        size = int(self.headers.get("Content-Length") or 0)
+        if size > 2048 or not (self.headers.get("Content-Type") or "").startswith("application/json"):
+            return reply(400, error="invalid request")
+        body = json.loads(self.rfile.read(size) or b"{}")
+        if not isinstance(body, dict):
+            raise TypeError
+    except (ValueError, TypeError):
+        return reply(400, error="invalid request")
+    action, path = body.get("action"), body.get("path")
+    try:
+        if action == "add":
+            return reply(200, ok=True, path=add_watch(path))
+        if action == "remove":
+            return reply(200, ok=True, path=remove_watch(path))
+        return reply(400, error="invalid request")
+    except ValueError as exc:  # validation messages are written for the user
+        return reply(400, error=str(exc))
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        print(f"[watch] failed: {exc}", flush=True)
+        return reply(500, error="Audit qaydası tətbiq olunmadı. Ətraflı: journalctl -u fileaudit")
+
+
+Handler.do_POST = do_POST
+
+
 def main():
+    if len(sys.argv) > 2 and sys.argv[1] == "--install-rules":
+        args, add, remove = sys.argv[3:], [], []
+        while args:
+            flag, value = args[0], (args[1] if len(args) > 1 else "")
+            (add if flag == "--watch" else remove if flag == "--unwatch" else []).append(value)
+            if flag not in ("--watch", "--unwatch") or not value:
+                raise SystemExit(f"naməlum arqument: {flag}")
+            args = args[2:]
+        return install_rules(sys.argv[2], add, remove)
     if not is_loopback(HOST) and not PASSWORD:
         raise SystemExit(f"FA_HOST={HOST} opens the panel to the network: set FA_PASSWORD first "
                          "(in /etc/fileaudit.env). Refusing to start without a password.")
