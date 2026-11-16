@@ -57,6 +57,67 @@ Susmaya görə bu qovluqlar izlənir: **`/home`**, **`/etc`**, **`/root`**.
 
 Kali virtual maşında (VirtualBox, VMware) işləyirsə, heç bir əlavə ayar lazım deyil.
 
+Windows üçün ayrıca versiya var: aşağıdakı [Windows-da işlətmək](#windows-da-işlətmək) bölməsinə baxın.
+
+---
+
+## Windows-da işlətmək
+
+Windows 10/11 versiyası eyni paneli göstərir, amma məlumatı Windows-un öz mexanizmlərindən götürür:
+- **nə dəyişdi** (yaradıldı, silindi, dəyişdirildi, ad dəyişdi): `FileSystemWatcher`;
+- **kim etdi və hansı proqramla, icazə dəyişiklikləri, rədd edilmiş cəhdlər:** Windows Security logu (4663, 4670 və 4656 hadisələri).
+
+Heç nə yükləmək lazım deyil: Windows-da hazır olan PowerShell 5.1 kifayətdir. Proqram `SYSTEM` adından işləyən **AuditPulse** adlı planlaşdırılmış tapşırıq kimi qurulur. Bu tapşırıq kompüter açılanda özü işə düşür, dayansa bir dəqiqə sonra yenidən başlayır.
+
+### Quraşdırma
+
+1. Layihəni yükləyin (`git clone https://github.com/mikayilmovsumzada/AuditPulse.git` və ya ZIP).
+2. **PowerShell-i administrator kimi açın:** Start menyusunda "PowerShell" yazın, sağ klik edib **Run as administrator** seçin.
+3. Layihə qovluğuna keçin və quraşdırıcını işlədin:
+   ```powershell
+   cd C:\yol\AuditPulse
+   powershell -ExecutionPolicy Bypass -File .\windows\Install-AuditPulse.ps1
+   ```
+4. Brauzerdə `http://localhost:8088` ünvanını açın.
+
+Quraşdırıcı bunları edir:
+1. Windows fayl auditini yandırır ("Audit File System": uğurlu və uğursuz cəhdlər). Əvvəlki audit ayarlarının ehtiyat nüsxəsi `C:\ProgramData\AuditPulse\auditpol-backup.csv` faylında saxlanılır.
+2. Proqramı `C:\Program Files\AuditPulse` qovluğuna köçürür. Hadisələri `C:\ProgramData\AuditPulse` qovluğunda saxlayır, bu qovluğu yalnız `SYSTEM` və administratorlar oxuya bilir.
+3. Hər izlənən qovluğa audit qaydası (SACL) əlavə edir, Windows bundan sonra kimin nəyi dəyişdiyini loga yazır. Qovluqların icazələrinə və sahibinə toxunulmur.
+4. Planlaşdırılmış tapşırığı qeydiyyatdan keçirir və işə salır.
+
+Susmaya görə sizin **Desktop**, **Documents** və **Downloads** qovluqlarınız izlənir. Proqramın port `8088` boş deyilsə, quraşdırıcı dayanır və başqa port seçməyi təklif edir.
+
+### Seçimlər
+
+| Nə etmək istəyirsiniz | Əmr (administrator PowerShell-də, layihə qovluğunda) |
+|---|---|
+| Qovluq əlavə etmək | `powershell -ExecutionPolicy Bypass -File .\windows\Install-AuditPulse.ps1 -Watch "C:\inetpub"` |
+| Qovluğu çıxarmaq | `powershell -ExecutionPolicy Bypass -File .\windows\Install-AuditPulse.ps1 -Unwatch "C:\Users\Ad\Downloads"` |
+| Panelə parol qoymaq (qovluqları paneldən seçmək üçün) | `powershell -ExecutionPolicy Bypass -File .\windows\Install-AuditPulse.ps1 -SetPassword` |
+| Başqa port | `... Install-AuditPulse.ps1 -Port 8090` |
+| Security logunu böyütmək (çox hadisə olanda) | `... Install-AuditPulse.ps1 -SecurityLogSizeMB 256` |
+
+Parol qoyulandan sonra paneldəki **"İzlənir: …"** düyməsindən də qovluq əlavə etmək və çıxarmaq olar. Bütün disk (`C:\`), `Windows`, `Program Files` və `ProgramData` qovluqları izlənə bilməz. İstisnalar `hosts` faylının qovluğu və avtomatik başlanğıc (StartUp) qovluğudur.
+
+### Gündəlik idarəetmə (PowerShell)
+
+| Nə etmək istəyirsiniz | Əmr |
+|---|---|
+| İşləyirmi? | `Get-ScheduledTask -TaskName AuditPulse \| Select-Object State` |
+| Başlatmaq | `Start-ScheduledTask -TaskName AuditPulse` |
+| Dayandırmaq | `Stop-ScheduledTask -TaskName AuditPulse` |
+| Logu görmək | `Get-Content C:\ProgramData\AuditPulse\auditpulse.log -Tail 20` |
+
+### Silmək
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\windows\Uninstall-AuditPulse.ps1
+```
+Tapşırığı, proqramı və qovluqlara əlavə olunan audit qaydalarını silir. Toplanmış hadisələri də silmək üçün `-RemoveData`, Windows audit ayarlarını əvvəlki vəziyyətinə qaytarmaq üçün `-RestoreAuditPolicy` əlavə edin.
+
+> **Qeyd:** "İstifadəçi məlumatı yoxdur" yazısı görünürsə, Security logu oxunmur. Bu halda dəyişikliklər yenə görünür, amma kimin etdiyi və hansı proqramla edildiyi görünmür. Proqramı quraşdırıcı ilə qurun: o, auditi yandırır və proqramı `SYSTEM` kimi işlədir.
+
 ---
 
 ## Quraşdırma (addım-addım)
