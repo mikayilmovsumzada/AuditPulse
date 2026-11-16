@@ -151,6 +151,7 @@ Bu sətirlər görünürsə, quraşdırma uğurla bitib.
 - **Kartlar** (yuxarıda): bir karta klikləsəniz, siyahıda yalnız həmin növ hadisələr qalır. Yenidən klikləsəniz, filtr ləğv olunur.
 - **Axtarış:** fayl adı, yol, proqram və ya əmr yazın.
 - **İstifadəçi / qovluq filtrləri:** yalnız bir istifadəçinin və ya bir qovluğun hadisələrinə baxmaq üçün.
+- **"İzlənir: …" düyməsi** (yuxarıda): izlənən qovluqların siyahısını açır. Parol qoyulubsa, buradan qovluq əlavə etmək və çıxarmaq olar (bax: "Hansı qovluqların izlənəcəyini seçmək").
 - **Hadisəyə klik:** sağda ətraflı məlumat açılır: tam yol, vaxt, kim etdi, hansı hüquqla, proqram və işlədilən əmr. `chmod` hadisələrində sahib, qrup və digərləri üçün r/w/x cədvəli göstərilir, dəyişən icazələr narıncı rənglə seçilir.
 - **"Gizli faylları göstər":** proqramlar `.cache`, `.config` kimi gizli qovluqlarda daim fayl yazır. Siyahı dolmasın deyə bu fayllar susmaya görə gizlədilir. Bu seçimi açanda onlar da görünür.
 - **Sıfırla:** bütün filtrləri təmizləyir.
@@ -175,28 +176,30 @@ Bu sətirlər görünürsə, quraşdırma uğurla bitib.
 
 ## Ayarlar
 
-### Başqa qovluğu izləmək
+### Hansı qovluqların izlənəcəyini seçmək
 
-1. Layihə qovluğunda `fileaudit.rules` faylını açın:
-   ```bash
-   nano fileaudit.rules
-   ```
-2. Digər `-w` sətirlərinin yanına yeni sətir əlavə edin. Məsələn, `/var/www` üçün:
-   ```
-   -w /var/www -p wa -k fa_www
-   ```
-   - `-w`: izlənəcək qovluq;
-   - `-p wa`: yazma (`w`) və atribut dəyişiklikləri (`a`, yəni chmod və chown);
-   - `-k`: qeyd adı. Mütləq **`fa_`** ilə başlamalıdır, yoxsa panel bu hadisəni görməyəcək.
-3. Yadda saxlayın (`Ctrl + O`, Enter) və çıxın (`Ctrl + X`).
-4. Quraşdırıcını yenidən işlədin:
-   ```bash
-   sudo bash install.sh
-   ```
+Panel yalnız seçilmiş qovluqlarda (və onların bütün alt qovluqlarında) baş verənləri göstərir. Susmaya görə bunlar `/home`, `/etc` və `/root`-dur. Siyahını üç yolla dəyişmək olar.
 
-Qovluğu izləmədən çıxarmaq üçün də eyni yolla həmin sətri silin və `install.sh` faylını yenidən işlədin.
+**1. Paneldən (ən rahat yol).** Yuxarıdakı **"İzlənir: …"** düyməsinə klikləyin. Açılan pəncərədə:
+- yeni qovluğun tam yolunu yazıb **Əlavə et** basın, məsələn `/var/www`;
+- və ya kompüterdə tapılan tövsiyələrdən birinə (`/var/www`, `/srv`, `/opt`, `/etc/nginx`…) bir dəfə klikləyin;
+- qovluğu çıxarmaq üçün yanındakı **Çıxar** düyməsini basın.
 
-> **Diqqət:** bütün sistemi (`/`) izləməyin. Hər saniyə minlərlə hadisə yaranar, həm panel, həm də sistem yavaşlayar.
+Dəyişiklik dərhal tətbiq olunur və kompüter yenidən başlayanda da qalır. Bu imkan yalnız panelə parol qoyulanda açılır (`FA_PASSWORD`, aşağıdakı "Paneli şəbəkədən açmaq" bölməsində necə qoyulduğu yazılıb). Parolsuz panel siyahını yalnız göstərir, çünki əks halda kompüterdəki istənilən istifadəçi izləməni söndürüb izini gizlədə bilərdi.
+
+**2. Quraşdırma zamanı.** `install.sh` əmrinə `--watch` və `--unwatch` seçimlərini əlavə edin (bir neçə dəfə yazmaq olar):
+```bash
+sudo bash install.sh --watch /var/www --watch /srv
+```
+```bash
+sudo bash install.sh --unwatch /root
+```
+
+**3. Əl ilə.** `/etc/audit/rules.d/fileaudit.rules` faylında `-w` sətirlərini redaktə edin (məsələn `-w /var/www -p wa -k fa_var_www`), sonra `sudo augenrules --load && sudo systemctl restart fileaudit` işlədin. Qeyd adı (`-k`) mütləq **`fa_`** ilə başlamalıdır.
+
+`install.sh` yenidən işlədiləndə paneldən və ya `--watch` ilə seçilmiş qovluqlar saxlanılır.
+
+> **Diqqət:** bütün sistem (`/`), `/proc`, `/sys`, `/dev`, `/run`, audit logunun özü və panelin öz bazası izlənə bilməz: hər saniyə minlərlə hadisə yaranar, həm panel, həm də sistem yavaşlayar. İç-içə qovluqlar da (məsələn `/etc` izlənərkən `/etc/nginx`) qəbul edilmir, çünki valideyn qovluq artıq onları əhatə edir. Ən çoxu 16 qovluq izlənə bilər.
 
 ### Paneli şəbəkədən açmaq
 
