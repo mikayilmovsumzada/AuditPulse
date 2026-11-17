@@ -118,7 +118,10 @@ Get-ChildItem -LiteralPath $Dest -Recurse -File | Unblock-File
 Step '[5/5] Servis (planlaşdırılmış tapşırıq) qeydiyyatdan keçir və başladılır...'
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" `
     -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Dest\windows\AuditPulse.ps1`""
-$trigger = New-ScheduledTaskTrigger -AtStartup
+# "Restart on failure" only covers a failed launch, not a process that exits later, so a
+# second trigger re-checks every 5 minutes; IgnoreNew makes it a no-op while the service runs.
+$watchdog = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
+$trigger = @((New-ScheduledTaskTrigger -AtStartup), $watchdog)
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable `
     -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew
@@ -128,7 +131,7 @@ Start-ScheduledTask -TaskName $TaskName
 
 $url = "http://localhost:$($cfg.port)/"
 $ok = $false
-for ($i = 0; $i -lt 15 -and -not $ok; $i++) {
+for ($i = 0; $i -lt 45 -and -not $ok; $i++) {
     Start-Sleep -Seconds 1
     try { Invoke-WebRequest -Uri "${url}api/meta" -UseBasicParsing -TimeoutSec 2 | Out-Null; $ok = $true }
     catch { if ($_.Exception.Response -and [int]$_.Exception.Response.StatusCode -eq 401) { $ok = $true } }

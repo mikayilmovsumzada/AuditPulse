@@ -166,8 +166,42 @@ function Get-WatchKey([string]$Path) {
 
 # Security log facts per path, used to fill in user and program for FileSystemWatcher changes.
 $script:SecByPath = @{}
-$script:LastRecord = [long]0
 $script:SecStatus = 'unknown'
+$script:SecLog = $null
+$MaxSecPerTick = 500
+
+# Querying the Security log for "records newer than N" makes Windows scan the whole log every
+# time (it cannot stop early), which took 10-30 s on a big log and froze the panel. A
+# subscription instead gets each new event pushed once, as Windows writes it.
+if (-not ('AuditPulseSecLog' -as [type])) {
+    Add-Type -ReferencedAssemblies System.Core -TypeDefinition @'
+using System;
+using System.Collections.Concurrent;
+using System.Diagnostics.Eventing.Reader;
+public sealed class AuditPulseSecLog : IDisposable {
+    public readonly ConcurrentQueue<EventRecord> Queue = new ConcurrentQueue<EventRecord>();
+    public volatile string Error;
+    private readonly EventLogWatcher w;
+    public AuditPulseSecLog() {
+        var q = new EventLogQuery("Security", PathType.LogName, "*[System[(EventID=4663 or EventID=4670 or EventID=4656)]]");
+        w = new EventLogWatcher(q, null, false);
+        w.EventRecordWritten += (s, e) => {
+            if (e.EventException != null) { Error = e.EventException.Message; return; }
+            if (e.EventRecord == null) return;
+            if (Queue.Count > 100000) { e.EventRecord.Dispose(); Error = "queue full"; return; }
+            Queue.Enqueue(e.EventRecord);
+        };
+        w.Enabled = true;
+    }
+    public void Dispose() { w.Enabled = false; w.Dispose(); }
+}
+'@
+}
+
+function Start-SecLog {
+    try { $script:SecLog = New-Object AuditPulseSecLog; $script:SecStatus = 'ok' }
+    catch { $script:SecStatus = 'unavailable'; Write-Log "[security] Security loguna abunə alınmadı: $($_.Exception.Message)" }
+}
 
 function Remember-Sec([string]$Path, $Info) {
     $k = $Path.ToLowerInvariant()
@@ -190,16 +224,14 @@ function Get-SidName([string]$Sid) {
 function Get-Short([string]$Account) { if ($Account -match '\\') { return $Account.Split('\')[-1] } return $Account }
 
 function Read-SecurityLog {
-    $xpath = "*[System[(EventID=4663 or EventID=4670 or EventID=4656) and EventRecordID > $($script:LastRecord)]]"
-    try {
-        $events = @(Get-WinEvent -LogName Security -FilterXPath $xpath -MaxEvents 3000 -ErrorAction Stop | Sort-Object RecordId)
-        $script:SecStatus = 'ok'
-    } catch {
-        if ($_.Exception.Message -match 'No events were found|Heç bir hadisə') { $script:SecStatus = 'ok'; return }
-        $script:SecStatus = 'unavailable'; return
-    }
+    if (-not $script:SecLog) { return }
+    if ($script:SecLog.Error) { Write-Log "[security] $($script:SecLog.Error)"; $script:SecLog.Error = $null }
+    # Take at most a batch per tick so a burst of events never keeps the panel waiting.
+    $events = New-Object System.Collections.Generic.List[object]
+    $ev = $null
+    while ($events.Count -lt $MaxSecPerTick -and $script:SecLog.Queue.TryDequeue([ref]$ev)) { $events.Add($ev) }
     foreach ($ev in $events) {
-        $script:LastRecord = [Math]::Max($script:LastRecord, [long]$ev.RecordId)
+      try {
         $d = @{}
         foreach ($n in ([xml]$ev.ToXml()).Event.EventData.Data) { $d[$n.Name] = [string]$n.'#text' }
         $path = $d['ObjectName']
@@ -225,6 +257,7 @@ function Read-SecurityLog {
         } elseif ($ev.Id -eq 4663 -and -not $failed) {
             Remember-Sec $path @{ ts = $ts; user = $user; exe = $exe }
         }
+      } finally { $ev.Dispose() }
     }
     # forget old facts
     $cut = (Get-UnixNow) - 120
@@ -502,6 +535,7 @@ if ($script:Config.host -notin @('127.0.0.1', 'localhost') -and -not $script:Con
 }
 Load-Events
 Start-Watchers
+Start-SecLog
 
 $listener = New-Object System.Net.HttpListener
 $hostName = if ($script:Config.host -in @('127.0.0.1', 'localhost')) { $script:Config.host } else { '+' }
@@ -510,19 +544,28 @@ if ($hostName -eq '127.0.0.1') { $listener.Prefixes.Add("http://localhost:$($scr
 $listener.Start()
 Write-Log "AuditPulse işləyir: http://localhost:$($script:Config.port)  (izlənir: $($script:Config.folders -join ', '))"
 
-$lastSec = 0.0
+$lastErr = ''
 try {
     while ($listener.IsListening) {
         $task = $listener.GetContextAsync()
         while (-not $task.Wait(250)) {
-            Collect-FsEvents
-            $now = Get-UnixNow
-            if ($now - $lastSec -ge 2) { Read-SecurityLog; $lastSec = $now }
-            Flush-Pending
+            # One bad event or path must not stop the whole service: log it and keep going.
+            try {
+                Collect-FsEvents
+                Read-SecurityLog
+                Flush-Pending
+            } catch {
+                $msg = "$($_.Exception.Message) @ $($_.InvocationInfo.ScriptLineNumber)"
+                if ($msg -ne $lastErr) { Write-Log "[loop] xəta (servis davam edir): $msg"; $lastErr = $msg }
+            }
         }
         Handle $task.Result
     }
+} catch {
+    Write-Log "[fatal] servis dayandı: $($_.Exception.Message) @ $($_.InvocationInfo.ScriptLineNumber)"
+    exit 1
 } finally {
     $listener.Stop()
     foreach ($w in $script:Watchers) { $w.Dispose() }
+    if ($script:SecLog) { $script:SecLog.Dispose() }
 }
